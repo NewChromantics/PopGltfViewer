@@ -393,8 +393,9 @@ export default class ModelViewer extends HTMLElement
 		return this.Assets; 
 	}
 	
-	GetRenderCommands(Assets)
+	GetRenderCommands(Assets,ScreenRect)
 	{
+		const ScreenViewport = [0,0,ScreenRect[2],ScreenRect[3]];
 		const Commands = [];
 		const Time = ((Pop.GetTimeNowMs()/1000) % 2)/2;
 		//const ClearColour = [Time,1,0];
@@ -433,7 +434,7 @@ export default class ModelViewer extends HTMLElement
 			
 			const Uniforms = Object.assign({},Actor.Uniforms);
 			const PopMath = Pop.Math;
-			const RenderViewport = [0,0,1,1];
+			const RenderViewport = ScreenViewport;
 			const WorldToCameraMatrix = Camera.GetWorldToCameraMatrix();
 			const CameraProjectionMatrix = Camera.GetProjectionMatrix( RenderViewport );
 			const ScreenToCameraTransform = PopMath.MatrixInverse4x4( CameraProjectionMatrix );
@@ -457,7 +458,8 @@ export default class ModelViewer extends HTMLElement
 			try
 			{
 				const Assets = await this.LoadAssets(this.RenderContext);
-				const RenderCommands = this.GetRenderCommands(Assets);
+				const ScreenRect = this.RenderContext.GetScreenRect();
+				const RenderCommands = this.GetRenderCommands(Assets,ScreenRect);
 				await this.RenderContext.Render(RenderCommands);
 			}
 			catch(e)
