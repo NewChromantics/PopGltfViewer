@@ -209,52 +209,89 @@ export default class ModelViewer extends HTMLElement
 	{
 		this.Canvas = this.MakeCanvas();
 
-		this.CloseButton = document.createElement('button');
-		this.CloseButton.innerText = 'Cancel';
-		this.CloseButton.className = 'Close';
-		this.CloseButton.onclick = this.OnClickedClose.bind(this);
-
-		this.FinishedButton = document.createElement('button');
-		this.FinishedButton.innerText = this.finishedLabel;
-		this.FinishedButton.className = 'Save and close';
-		this.FinishedButton.onclick = this.OnClickedFinished.bind(this);
-
+		this.StatusBox = document.createElement('div');
+		this.StatusBox.className = 'StatusBox';
+		this.StatusLabel = document.createElement('div');
+		this.StatusLabel.innerText = null;
+		this.StatusLabel.className = 'StatusLabel';
+		this.ErrorLabel = document.createElement('div');
+		this.ErrorLabel.innerText = null;
+		this.ErrorLabel.className = 'ErrorLabel';
 
 		// Create some CSS to apply to the shadow dom
 		const Style = document.createElement('style');
 		Style.textContent = `
-		:host /* shadow dom root */
+		:host /* shadow dom root, this can be overridden by whatever is embedding this */
 		{
-			--padding:		2vmin;
-			background:		#fff;
+			background:		#0f0;
 			padding:		0px;
+			margin:			0px;
 			position:		relative;
-			min-height:		100px;
-			overflow:		hidden;
 		}
 		
-		canvas
+		/* make both full-size absolute so they can overlap */
+		canvas, 
+		.StatusBox
 		{
+			position:		absolute;
+			top:			0px;
+			xright:			0px;
+			xbottom:		0px;
+			left:			0px;
+			min-height:		100px;
 			border:			none;
 			width:			100%;
 			height:			100%;
 		}
 		
-		button.Close
+		canvas
 		{
-			position:	fixed;
-			margin:		var(--padding);
-			right:		var(--padding);
-			top:		var(--padding);
+			cursor:	pointer;
 		}
-				
+		
+		/* container for labels so we can easily center*/
+		.StatusBox
+		{
+			display:			flex;
+			flex-direction:		column;
+			align-content:		center;
+			justify-content:	center;
+			align-items:		center;
+			pointer-events:		none;
+		}
+		
+		.StatusLabel,
+		.ErrorLabel
+		{
+			opacity:			0.8;
+			background:			#f99;
+			color:				#fff;
+			border:				1px white solid;
+			padding:			0.5em;
+			margin:				0.5em;
+			border-radius:		0.5em;
+			pointer-events:		auto;
+		}
+		.StatusLabel
+		{
+			background:		#99f;
+		}
+		
+		.StatusLabel:empty,
+		.ErrorLabel:empty
+		{
+			display:	none;
+		}
+		
+		
 		/***********/`;
 		
 		// attach the created elements to the shadow dom
 		Parent.appendChild(Style);
-		//Parent.appendChild(this.CloseButton);
-		//Parent.appendChild(this.FinishedButton);
 		Parent.appendChild(this.Canvas);
+		Parent.appendChild(this.StatusBox);
+		this.StatusBox.appendChild(this.StatusLabel);
+		this.StatusBox.appendChild(this.ErrorLabel);
 	}
 	
 	SetupRenderer(Canvas)
@@ -288,11 +325,16 @@ export default class ModelViewer extends HTMLElement
 		this.RenderContext = null;
 	}
 	
-	OnError(Error)
+	OnStatus(Status)
 	{
-		this.OnClickedClose();
+		this.StatusLabel.innerText = Status;
 	}
 	
+	OnError(Error)
+	{
+		this.ErrorLabel.innerText = `${Error}`;
+		this.OnClickedClose();
+	}	
 		
 	OnClickedFinished(Event)
 	{
@@ -364,6 +406,18 @@ export default class ModelViewer extends HTMLElement
 			//const Filename = '/Assets/Foo/Avocado/Avocado.gltf';
 			//const Filename = '/Assets/Foo/SciFiHelmet/SciFiHelmet.gltf';
 			
+			//	wrap load calls with status update
+			const LoadStringAsync = async function(Filename)
+			{
+				this.OnStatus(`Loading ${Filename}...`);
+				return this.LoadFileAsStringAsync(...arguments);
+			}
+			const LoadBufferAsync = async function(Filename)
+			{
+				this.OnStatus(`Loading ${Filename}...`);
+				return this.LoadFileAsArrayBufferAsync(...arguments);
+			}
+
 			async function PushGeometry(Name,Geometry)
 			{
 				//const Geo = CreateCubeGeometry(0,1);
@@ -375,14 +429,16 @@ export default class ModelViewer extends HTMLElement
 			}
 			try
 			{
-				await LoadGltf( Filename, this.LoadFileAsStringAsync.bind(this), this.LoadFileAsArrayBufferAsync.bind(this), PushGeometry.bind(this), PushActor.bind(this) );
+				await LoadGltf( Filename, LoadStringAsync.bind(this), LoadBufferAsync.bind(this), PushGeometry.bind(this), PushActor.bind(this) );
 				
 				if ( this.Actors.length == 0 )
 					throw `GLTF loaded without error, but didn't add any actors.`;
+				this.OnStatus(`Loaded ${Filename}`);
+				this.OnStatus(null);
 			}
 			catch(e)
 			{
-				console.error(e);
+				this.OnError(e);
 
 				const CubeActor = {};
 				CubeActor.Geometry = 'Cube';
