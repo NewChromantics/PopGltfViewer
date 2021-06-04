@@ -1,8 +1,34 @@
 import Pop from './PopEngine/PopEngine.js'
 import {CreateCubeGeometry} from './PopEngine/CommonGeometry.js'
 import Camera from './PopEngine/Camera.js'
-//import gltf from './PopEngine/gltf/gltf/gltf.js'
 import ParseGltf from './PopEngine/PopGltf.js/Gltf.js'
+import DragAndDropHandler from './PopEngine/HtmlDragAndDropHandler.js'
+
+
+const GltfExtension = 'gltf';
+
+
+function GetRgbaArray(Rgba)
+{
+	function PadArray0001(a)
+	{
+		while ( a.length < 3 )
+			a.push(0);
+		while ( a.length < 4 )
+			a.push(1);
+		return a;
+	}
+	
+	//	if it's a string, assume [x,y,z] json
+	//	todo: allow HTML strings
+	if ( typeof Rgba == typeof '' )
+	{
+		Rgba = JSON.parse(Rgba);
+	}
+	
+	Rgba = PadArray0001(Rgba);
+	return Rgba;
+}
 
 function GetSiblingFilename(Filename,SiblingFilename)
 {
@@ -12,7 +38,7 @@ function GetSiblingFilename(Filename,SiblingFilename)
 	return NewFilename;
 }
 
-async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBufferAsync,EnumGeometry,EnumActor)
+async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBufferAsync,OnLoadingBuffer,EnumGeometry,EnumActor)
 {
 	async function LoadFileAsync(Filename)
 	{
@@ -23,7 +49,7 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 	
 	const GltfJson = await LoadFileAsStringAsync(GltfFilename);
 	const GltfObj = JSON.parse( GltfJson );
-	const Gltf = await ParseGltf( GltfObj, LoadFileAsync );
+	const Gltf = await ParseGltf( GltfObj, LoadFileAsync, OnLoadingBuffer );
 
 	//	load all meshes first
 	for ( let GeometryName in Gltf.Geometrys )
@@ -73,9 +99,21 @@ void main()
 const BasicFragShader = `
 precision highp float;
 varying vec2 uv;
+
+bool IsAlternativeUv()
+{
+	float GridSize = 0.05;
+	vec2 GridUv = mod( uv, GridSize ) / GridSize;
+	bool Left = GridUv.x < 0.5;
+	bool Top = GridUv.y < 0.5;
+	return !(Left==Top);	//	top left and bottom right
+}
+
 void main()
 {
-	gl_FragColor = vec4(uv,0,1);
+	bool AlternativeColour = IsAlternativeUv();
+	float Blue = AlternativeColour?1.0:0.0;
+	gl_FragColor = vec4(uv,Blue,1);
 }
 `;
 
@@ -147,10 +185,8 @@ export default class ModelViewer extends HTMLElement
 		this.Assets = {};	//	render assets
 		this.Actors = [];
 		
-		//	Create a shadow root
-		const Shadow = this.attachShadow({mode: 'open'});
-		this.SetupDom(Shadow);
-		this.SetupRenderer(this.Canvas);
+		//	cache of files for drag & drop
+		this.Files = {};	//	[Filename] = File
 	}
 	
 	
@@ -182,14 +218,67 @@ export default class ModelViewer extends HTMLElement
 			this.setAttribute('modelFilename', NewFilename);
 		this.ReloadModel();
 	}
-
+	
+	get clearColour()
+	{
+		let RgbaString = this.getAttribute('clearColour');
+		try
+		{
+			let Rgba = GetRgbaArray(RgbaString);
+			return Rgba;
+		}
+		catch(e)
+		{
+			console.warn(`Invalid clear colour(${RgbaString}); ${e}`);
+			return [1.0,0.0,1.0,1.0];	//	magenta/pink for error
+		}
+	}
+	set clearColour(Rgba)	
+	{
+		//	should be array
+		Rgba = GetRgbaArray(Rgba);
+		const RgbaString = JSON.stringify(Rgba);
+		this.setAttribute('clearColour', RgbaString);
+	}
+	
+	async OnDroppedFiles(NewFiles)
+	{
+		//	save all the files, then try and load any with model filenames
+		for ( let DroppedFile of NewFiles )
+		{
+			this.Files[DroppedFile.Name] = DroppedFile.Contents;
+		}
+		function IsModelFilename(File)
+		{
+			const FileExtension = File.Name.split('.').pop().toLowerCase();
+			return ( FileExtension == GltfExtension ); 
+		}
+		const FirstModelFile = NewFiles.find( IsModelFilename );
+		if ( !FirstModelFile )
+			throw `Dropped files but couldn't find a model to load`;
+			
+		this.modelFilename = FirstModelFile.Name;
+	}
+	
 	async LoadFileAsStringAsync(Filename)
 	{
+		let CacheContents = this.Files[Filename];
+		if ( CacheContents )
+		{
+			if ( typeof CacheContents != typeof '' )
+				CacheContents = Pop.BytesToString(CacheContents);
+			return CacheContents;
+		}
+			
 		return Pop.FileSystem.LoadFileAsStringAsync(Filename);
 	}
 	
 	async LoadFileAsArrayBufferAsync(Filename)
 	{
+		const CacheContents = this.Files[Filename];
+		if ( CacheContents )
+			return CacheContents;
+			
 		return Pop.FileSystem.LoadFileAsArrayBufferAsync(Filename);
 	}
 	
@@ -223,7 +312,7 @@ export default class ModelViewer extends HTMLElement
 		Style.textContent = `
 		:host /* shadow dom root, this can be overridden by whatever is embedding this */
 		{
-			background:		#0f0;
+			xbackground:		#0f0;
 			padding:		0px;
 			margin:			0px;
 			position:		relative;
@@ -247,6 +336,11 @@ export default class ModelViewer extends HTMLElement
 		canvas
 		{
 			cursor:	pointer;
+		}
+		
+		canvas[Dragging=true]
+		{
+			border:	10px dashed #c99;
 		}
 		
 		/* container for labels so we can easily center*/
@@ -316,12 +410,24 @@ export default class ModelViewer extends HTMLElement
 	
 	connectedCallback()
 	{
+		//	Create a shadow root
+		const Shadow = this.attachShadow({mode: 'open'});
+		this.SetupDom(Shadow);
+		this.SetupRenderer(this.Canvas);
+
+		this.DragAndDropThread(this.Canvas);
+
+		//	initialise clear colour if it hasn't been set
+		this.clearColour = this.clearColour;
 		this.ReloadModel();
 	}
 	
 	disconnectedCallback()
 	{
 		//	cleanup render view & render context
+		console.log(`Cleaning up model viewer...`);
+		if ( this.RenderContext )
+			this.RenderContext.Close();
 		this.RenderContext = null;
 	}
 	
@@ -332,8 +438,9 @@ export default class ModelViewer extends HTMLElement
 	
 	OnError(Error)
 	{
-		this.ErrorLabel.innerText = `${Error}`;
-		this.OnClickedClose();
+		this.ErrorLabel.innerText = Error ? `${Error}` : null;
+		if ( Error )
+			this.OnClickedClose();
 	}	
 		
 	OnClickedFinished(Event)
@@ -379,7 +486,34 @@ export default class ModelViewer extends HTMLElement
 	ReloadModel()
 	{
 		console.log(`Queue new model to load ${this.modelFilename}`);
+		
+		//	clear old error
+		this.OnError(null);
+
 		this.PendingModelFilename = this.modelFilename;
+	}
+	
+	async DragAndDropThread(AttachToElement)
+	{
+		function OnDragStart()
+		{
+			//	gr: shadow dom's dont have attributes!
+			if ( AttachToElement.setAttribute )
+				AttachToElement.setAttribute('Dragging','true');
+		}
+		function OnDragEnd()
+		{
+			//	gr: shadow dom's dont have attributes!
+			if ( AttachToElement.removeAttribute )
+				AttachToElement.removeAttribute('Dragging');
+		}
+		
+		const Handler = new DragAndDropHandler( AttachToElement, OnDragStart, OnDragEnd );
+		while ( true )
+		{
+			const DroppedFiles = await Handler.WaitForDragAndDropFiles();
+			await this.OnDroppedFiles(DroppedFiles);
+		}
 	}
 	
 	async LoadAssets(RenderContext)
@@ -417,6 +551,10 @@ export default class ModelViewer extends HTMLElement
 				this.OnStatus(`Loading ${Filename}...`);
 				return this.LoadFileAsArrayBufferAsync(...arguments);
 			}
+			function OnLoadingBuffer(Filename)
+			{
+				this.OnStatus(`Loading ${Filename}...`);
+			}
 
 			async function PushGeometry(Name,Geometry)
 			{
@@ -429,7 +567,7 @@ export default class ModelViewer extends HTMLElement
 			}
 			try
 			{
-				await LoadGltf( Filename, LoadStringAsync.bind(this), LoadBufferAsync.bind(this), PushGeometry.bind(this), PushActor.bind(this) );
+				await LoadGltf( Filename, LoadStringAsync.bind(this), LoadBufferAsync.bind(this), OnLoadingBuffer.bind(this), PushGeometry.bind(this), PushActor.bind(this) );
 				
 				if ( this.Actors.length == 0 )
 					throw `GLTF loaded without error, but didn't add any actors.`;
@@ -455,7 +593,7 @@ export default class ModelViewer extends HTMLElement
 		const Commands = [];
 		const Time = ((Pop.GetTimeNowMs()/1000) % 2)/2;
 		//const ClearColour = [Time,1,0];
-		const ClearColour = [0.4,0.45,0.5];
+		const ClearColour = this.clearColour;
 		Commands.push(['SetRenderTarget',null,ClearColour]);
 		
 		/*
@@ -514,6 +652,9 @@ export default class ModelViewer extends HTMLElement
 			try
 			{
 				const Assets = await this.LoadAssets(this.RenderContext);
+				//	commonly disapears here so avoid exception
+				if ( !this.RenderContext )
+					continue;
 				const ScreenRect = this.RenderContext.GetScreenRect();
 				const RenderCommands = this.GetRenderCommands(Assets,ScreenRect);
 				await this.RenderContext.Render(RenderCommands);
