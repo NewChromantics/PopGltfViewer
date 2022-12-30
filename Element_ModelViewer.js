@@ -3,7 +3,7 @@ import {CreateCubeGeometry} from './PopEngine/CommonGeometry.js'
 import Camera from './PopEngine/Camera.js'
 import ParseGltf from './PopEngine/PopGltf.js/Gltf.js'
 import DragAndDropHandler from './PopEngine/HtmlDragAndDropHandler.js'
-
+import * as PopMath from './PopEngine/Math.js'
 
 const GltfExtension = 'gltf';
 
@@ -81,7 +81,8 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 }
 
 const BasicVertexShader = 
-`
+`#version 300 es
+precision highp float;
 in vec3 POSITION;
 in vec2 TEXCOORD_0;
 #define LocalPosition POSITION
@@ -96,9 +97,11 @@ void main()
 	uv = LocalUv.xy;
 }
 `;
-const BasicFragShader = `
+const BasicFragShader =
+`#version 300 es
 precision highp float;
-varying vec2 uv;
+in vec2 uv;
+out vec4 FragColor;
 
 bool IsAlternativeUv()
 {
@@ -113,7 +116,7 @@ void main()
 {
 	bool AlternativeColour = IsAlternativeUv();
 	float Blue = AlternativeColour?1.0:0.0;
-	gl_FragColor = vec4(uv,Blue,1);
+	FragColor = vec4(uv,Blue,1);
 }
 `;
 
@@ -391,7 +394,7 @@ export default class ModelViewer extends HTMLElement
 	SetupRenderer(Canvas)
 	{
 		this.RenderView = new Pop.Gui.RenderView('Model',Canvas);
-		this.RenderContext = new Pop.Opengl.Context(Canvas);
+		this.RenderContext = new Pop.Opengl.Context(this.RenderView);
 		this.Camera = new Camera();
 		this.Camera.Position = [ 0,1,5 ];
 		
@@ -596,27 +599,7 @@ export default class ModelViewer extends HTMLElement
 		const ClearColour = this.clearColour;
 		Commands.push(['SetRenderTarget',null,ClearColour]);
 		
-		/*
-		{
-			const Geometry = Assets.Cube;
-			const Shader = Assets.Shader;
-			const Camera = this.Camera;
-			const Uniforms = {};
-			const PopMath = Pop.Math;
-			const RenderViewport = [0,0,1,1];
-			const WorldToCameraMatrix = Camera.GetWorldToCameraMatrix();
-			const CameraProjectionMatrix = Camera.GetProjectionMatrix( RenderViewport );
-			const ScreenToCameraTransform = PopMath.MatrixInverse4x4( CameraProjectionMatrix );
-			const CameraToWorldTransform = PopMath.MatrixInverse4x4( WorldToCameraMatrix );
-			//const LocalToWorldTransform = Camera.GetLocalToWorldFrustumTransformMatrix();
-			const LocalToWorldTransform = PopMath.CreateIdentityMatrix();
-			const WorldToLocalTransform = PopMath.MatrixInverse4x4(LocalToWorldTransform);
-			Uniforms.LocalToWorldTransform = LocalToWorldTransform;
-			Uniforms.WorldToCameraTransform = WorldToCameraMatrix;
-			Uniforms.CameraProjectionTransform = CameraProjectionMatrix;
-			Commands.push(['Draw',Geometry,Shader,Uniforms]);
-		}
-		*/
+		
 		for ( let Actor of this.Actors )
 		{
 			const Camera = this.Camera;
@@ -627,7 +610,6 @@ export default class ModelViewer extends HTMLElement
 				continue;
 			
 			const Uniforms = Object.assign({},Actor.Uniforms);
-			const PopMath = Pop.Math;
 			const RenderViewport = ScreenViewport;
 			const WorldToCameraMatrix = Camera.GetWorldToCameraMatrix();
 			const CameraProjectionMatrix = Camera.GetProjectionMatrix( RenderViewport );
