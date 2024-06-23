@@ -1,4 +1,4 @@
-import Pop from './PopEngine/PopEngine.js'
+import * as Pop from './PopEngine/PopEngine.js'
 import {CreateCubeGeometry} from './PopEngine/CommonGeometry.js'
 import Camera from './PopEngine/Camera.js'
 import ParseGltf from './PopEngine/PopGltf.js/Gltf.js'
