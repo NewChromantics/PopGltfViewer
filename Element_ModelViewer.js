@@ -577,8 +577,6 @@ export default class ModelViewer extends HTMLElement
 			//	pop pending value so another thread can replace it again
 			const Filename = this.PendingModelFilename;
 			this.PendingModelFilename = null;
-			//const Filename = '/Assets/Foo/Avocado/Avocado.gltf';
-			//const Filename = '/Assets/Foo/SciFiHelmet/SciFiHelmet.gltf';
 			
 			//	wrap load calls with status update
 			const LoadStringAsync = async function(Filename)
@@ -603,7 +601,20 @@ export default class ModelViewer extends HTMLElement
 			}
 			async function PushActor(Actor)
 			{
+				Actor.Translation = Actor.Translation || [0,0,0];
 				this.Actors.push(Actor);
+				
+				//	if the actor has a skeleton, make a sibling actor
+				if ( Actor.Skeleton )
+				{
+					function AddJoint(Joint)
+					{
+						const CubeActor = {};
+						CubeActor.Geometry = 'Cube';
+						CubeActor.Translation = [0,0,0];
+						this.Actors.push(CubeActor);
+					}
+				}
 			}
 			try
 			{
@@ -653,7 +664,7 @@ export default class ModelViewer extends HTMLElement
 			const ScreenToCameraTransform = PopMath.MatrixInverse4x4( CameraProjectionMatrix );
 			const CameraToWorldTransform = PopMath.MatrixInverse4x4( WorldToCameraMatrix );
 			//const LocalToWorldTransform = Camera.GetLocalToWorldFrustumTransformMatrix();
-			const LocalToWorldTransform = PopMath.CreateIdentityMatrix();
+			const LocalToWorldTransform = PopMath.CreateTranslationMatrix( ...Actor.Translation );
 			const WorldToLocalTransform = PopMath.MatrixInverse4x4(LocalToWorldTransform);
 			Uniforms.LocalToWorldTransform = LocalToWorldTransform;
 			Uniforms.WorldToCameraTransform = WorldToCameraMatrix;
