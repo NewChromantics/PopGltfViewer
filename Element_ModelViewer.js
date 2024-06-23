@@ -5,7 +5,7 @@ import ParseGltf from './PopEngine/PopGltf.js/Gltf.js'
 import DragAndDropHandler from './PopEngine/HtmlDragAndDropHandler.js'
 import * as PopMath from './PopEngine/Math.js'
 
-const GltfExtension = 'gltf';
+const GltfExtensions = ['gltf','glb'];
 
 
 function GetRgbaArray(Rgba)
@@ -47,9 +47,9 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 		return await LoadFileAsArrayBufferAsync(Path);
 	}
 	
-	const GltfJson = await LoadFileAsStringAsync(GltfFilename);
-	const GltfObj = JSON.parse( GltfJson );
-	const Gltf = await ParseGltf( GltfObj, LoadFileAsync, OnLoadingBuffer );
+	//	load as binary now for GLB and let gltf parser parse
+	const GltfData = await LoadFileAsArrayBufferAsync(GltfFilename);
+	const Gltf = await ParseGltf( GltfData, LoadFileAsync, OnLoadingBuffer );
 
 	//	load all meshes first
 	for ( let GeometryName in Gltf.Geometrys )
@@ -85,9 +85,13 @@ const BasicVertexShader =
 precision highp float;
 in vec3 POSITION;
 in vec2 TEXCOORD_0;
+in vec3 NORMAL;
 #define LocalPosition POSITION
 #define LocalUv TEXCOORD_0
+//#define LocalUv vec2( float(gl_VertexID)/5.0f, float(gl_InstanceID)/5.0f )
+#define LocalNormal NORMAL
 out vec2 uv;
+out vec3 Normal;
 uniform mat4 LocalToWorldTransform;
 uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
@@ -95,12 +99,16 @@ void main()
 {
 	gl_Position = CameraProjectionTransform * WorldToCameraTransform * LocalToWorldTransform * vec4(LocalPosition,1);
 	uv = LocalUv.xy;
+	Normal = LocalNormal;
+	vec4 NormalWorld = (LocalToWorldTransform * vec4(LocalPosition,0));
+	//Normal = NormalWorld.xyz / NormalWorld.www;
 }
 `;
 const BasicFragShader =
 `#version 300 es
 precision highp float;
 in vec2 uv;
+in vec3 Normal;
 out vec4 FragColor;
 
 bool IsAlternativeUv()
@@ -114,6 +122,13 @@ bool IsAlternativeUv()
 
 void main()
 {
+	if ( Normal.x + Normal.y + Normal.y != 0.0 )
+	{
+		//	normal -1...1 to 0...1
+		vec3 NormalColour = (Normal + 1.0) / 2.0;
+		FragColor = vec4(NormalColour,1);
+		return;
+	}
 	bool AlternativeColour = IsAlternativeUv();
 	float Blue = AlternativeColour?1.0:0.0;
 	FragColor = vec4(uv,Blue,1);
@@ -254,7 +269,7 @@ export default class ModelViewer extends HTMLElement
 		function IsModelFilename(File)
 		{
 			const FileExtension = File.Name.split('.').pop().toLowerCase();
-			return ( FileExtension == GltfExtension ); 
+			return GltfExtensions.includes(FileExtension);
 		}
 		const FirstModelFile = NewFiles.find( IsModelFilename );
 		if ( !FirstModelFile )
@@ -622,6 +637,7 @@ export default class ModelViewer extends HTMLElement
 			Uniforms.WorldToCameraTransform = WorldToCameraMatrix;
 			Uniforms.CameraProjectionTransform = CameraProjectionMatrix;
 			Commands.push(['Draw',Geometry,Shader,Uniforms]);
+			
 		}
 		
 		return Commands;
