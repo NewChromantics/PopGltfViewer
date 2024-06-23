@@ -84,14 +84,18 @@ const BasicVertexShader =
 `#version 300 es
 precision highp float;
 in vec3 POSITION;
-in vec2 TEXCOORD_0;
 in vec3 NORMAL;
+in vec2 TEXCOORD_0;
+in vec4 WEIGHTS_0;
+in vec4 JOINTS_0;
 #define LocalPosition POSITION
 #define LocalUv TEXCOORD_0
 //#define LocalUv vec2( float(gl_VertexID)/5.0f, float(gl_InstanceID)/5.0f )
 #define LocalNormal NORMAL
 out vec2 uv;
 out vec3 Normal;
+out vec4 Weights;
+out vec4 Joints;
 uniform mat4 LocalToWorldTransform;
 uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
@@ -102,14 +106,16 @@ void main()
 	Normal = LocalNormal;
 	vec4 NormalWorld = (LocalToWorldTransform * vec4(LocalPosition,0));
 	//Normal = NormalWorld.xyz / NormalWorld.www;
+	Joints = JOINTS_0;
 }
 `;
 const BasicFragShader =
 `#version 300 es
 precision highp float;
+out vec4 FragColor;
 in vec2 uv;
 in vec3 Normal;
-out vec4 FragColor;
+in vec4 Joints;
 
 bool IsAlternativeUv()
 {
@@ -120,9 +126,25 @@ bool IsAlternativeUv()
 	return !(Left==Top);	//	top left and bottom right
 }
 
+vec3 GetDebugColour(int x)
+{
+	x = x % 6;
+	if ( x == 0 )	return vec3(1,0,0);
+	if ( x == 1 )	return vec3(1,1,0);
+	if ( x == 2 )	return vec3(0,1,0);
+	if ( x == 3 )	return vec3(0,1,1);
+	if ( x == 4 )	return vec3(0,0,1);
+	else	return vec3(1,0,1);
+}
+
 void main()
 {
-	if ( Normal.x + Normal.y + Normal.y != 0.0 )
+	if ( Joints.x + Joints.y + Joints.z + Joints.w != 0.0 )
+	{
+		FragColor = vec4( GetDebugColour(int(Joints.x)), 1 );
+		return;
+	}
+	if ( Normal.x + Normal.y + Normal.z != 0.0 )
 	{
 		//	normal -1...1 to 0...1
 		vec3 NormalColour = (Normal + 1.0) / 2.0;
