@@ -50,6 +50,7 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 	//	load as binary now for GLB and let gltf parser parse
 	const GltfData = await LoadFileAsArrayBufferAsync(GltfFilename);
 	const Gltf = await ParseGltf( GltfData, LoadFileAsync, OnLoadingBuffer );
+	console.log(Gltf);
 
 	//	load all meshes first
 	for ( let GeometryName in Gltf.Geometrys )
@@ -58,25 +59,66 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 		await EnumGeometry(GeometryName,Geometry);
 	}
 	
-	//	enumerate scene
-	for ( let Node of Gltf.nodes )
+	async function EnumerateScene(Scene)
 	{
-		//	eg camera
-		if ( Node.mesh === undefined )
-			continue;
-			
-		//const Node = Gltf.Nodes[NodeName];
-		const MeshGroup = Gltf.MeshGroups[Node.mesh];
-		const Actor = {};
-		Actor.Uniforms = {};
-		for ( let GeometryName of MeshGroup.GeometryNames )
+		const SceneNodeIndexes = Scene.nodes;
+		
+		async function EnumNode(Node)
 		{
-			Actor.Geometry = GeometryName;
-			await EnumActor(Actor);
+			//	eg. camera, joint node
+			if ( Node.mesh === undefined )
+			{
+				console.log(`Scene skipping node "${Node.name}" with no mesh`);
+				return;
+			}
+			
+			//const Node = Gltf.Nodes[NodeName];
+			const MeshGroup = Gltf.MeshGroups[Node.mesh];
+			
+			const Actor = {};
+			Actor.Uniforms = {};
+			
+			//	this node has a skeleton!
+			if ( Node.skin !== undefined )
+			{
+				Actor.Skeleton = Gltf.GetSkeleton(Node.skin);
+			}
+			
+			//	an actor here, may have multiple meshes!
+			//	really need a proper "node" and encompass all parts of an actor (node)
+			for ( let GeometryName of MeshGroup.GeometryNames )
+			{
+				Actor.Geometry = GeometryName;
+				await EnumActor(Actor);
+			}
+		}
+		
+		async function EnumNodeIndex(NodeIndex)
+		{
+			//	get node
+			const Node = Gltf.nodes[NodeIndex];
+			await EnumNode(Node);
+			
+			//	do children
+			const ChildIndexes = Node.children || [];
+			for ( let ChildIndex of ChildIndexes )
+			{
+				await EnumNodeIndex(ChildIndex);
+			}
+		}
+
+		for ( let ChildIndex of SceneNodeIndexes )
+		{
+			await EnumNodeIndex(ChildIndex);
 		}
 	}
 	
-	console.log(Gltf);
+	const DefaultSceneIndex = Gltf.scene || 0;
+	const DefaultScene = Gltf.scenes[DefaultSceneIndex];
+
+	await EnumerateScene(DefaultScene);
+
+	
 	return Gltf;
 }
 
@@ -139,11 +181,13 @@ vec3 GetDebugColour(int x)
 
 void main()
 {
+	/*
 	if ( Joints.x + Joints.y + Joints.z + Joints.w != 0.0 )
 	{
 		FragColor = vec4( GetDebugColour(int(Joints.x)), 1 );
 		return;
 	}
+*/
 	if ( Normal.x + Normal.y + Normal.z != 0.0 )
 	{
 		//	normal -1...1 to 0...1
@@ -565,7 +609,12 @@ export default class ModelViewer extends HTMLElement
 		
 		if ( !this.Assets['Cube'] )
 		{
-			const Geo = CreateCubeGeometry(0,1);
+			const Geo = CreateCubeGeometry(-0.1,0.1);
+			
+			//	rename pop attributes to GLTF names
+			Geo.POSITION = Geo.LocalPosition;
+			Geo.NORMAL = Geo.LocalNormal;
+			Geo.TEXCOORD_0 = Geo.LocalUv;
 			this.Assets['Cube'] = await RenderContext.CreateGeometry( Geo, null );
 		}
 
@@ -605,14 +654,30 @@ export default class ModelViewer extends HTMLElement
 				this.Actors.push(Actor);
 				
 				//	if the actor has a skeleton, make a sibling actor
+				//	gr: i believe a node can only have 1 skin...
+				//		doesnt make sense to have multiple skins for one scene object
 				if ( Actor.Skeleton )
 				{
-					function AddJoint(Joint)
+					try
 					{
-						const CubeActor = {};
-						CubeActor.Geometry = 'Cube';
-						CubeActor.Translation = [0,0,0];
-						this.Actors.push(CubeActor);
+						function AddJoint(Joint)
+						{
+							const CubeActor = {};
+							CubeActor.Geometry = 'Cube';
+							CubeActor.Translation = Joint.Translation;
+							CubeActor.Rotation = Joint.Rotation;
+							CubeActor.Uniforms = {};
+							this.Actors.push(CubeActor);
+						}
+						
+						//	skeletons are trees of joints
+						//	- joints have names, as well as indexes, to match vertex attributes
+						//	- tree produces bones
+						Actor.Skeleton.Joints.forEach( AddJoint.bind(this) );
+					}
+					catch(e)
+					{
+						console.error(`Error loading skeleton; ${e}`);
 					}
 				}
 			}
@@ -631,6 +696,7 @@ export default class ModelViewer extends HTMLElement
 
 				const CubeActor = {};
 				CubeActor.Geometry = 'Cube';
+				CubeActor.Translation = [0,0,0];
 				this.Actors.push(CubeActor);
 			}
 		}
