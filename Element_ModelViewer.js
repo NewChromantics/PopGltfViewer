@@ -8,6 +8,8 @@ import * as PopMath from './PopEngine/Math.js'
 const GltfExtensions = ['gltf','glb'];
 
 
+const CubeSize = 0.01;
+
 function GetRgbaArray(Rgba)
 {
 	function PadArray0001(a)
@@ -62,6 +64,7 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 	async function EnumerateScene(Scene)
 	{
 		const SceneNodeIndexes = Scene.nodes;
+		let ActorCount = 0;
 		
 		async function EnumNode(Node)
 		{
@@ -89,8 +92,10 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 			for ( let GeometryName of MeshGroup.GeometryNames )
 			{
 				Actor.Geometry = GeometryName;
-				await EnumActor(Actor);
+				await EnumActor(Actor,ActorCount);
 			}
+			
+			ActorCount++;
 		}
 		
 		async function EnumNodeIndex(NodeIndex)
@@ -149,6 +154,7 @@ void main()
 	vec4 NormalWorld = (LocalToWorldTransform * vec4(LocalPosition,0));
 	//Normal = NormalWorld.xyz / NormalWorld.www;
 	Joints = JOINTS_0;
+	Weights = WEIGHTS_0;
 }
 `;
 const BasicFragShader =
@@ -158,6 +164,7 @@ out vec4 FragColor;
 in vec2 uv;
 in vec3 Normal;
 in vec4 Joints;
+in vec4 Weights;
 
 bool IsAlternativeUv()
 {
@@ -181,13 +188,19 @@ vec3 GetDebugColour(int x)
 
 void main()
 {
-	/*
-	if ( Joints.x + Joints.y + Joints.z + Joints.w != 0.0 )
+	float JointSum = Joints.x + Joints.y + Joints.z + Joints.w;
+	float WeightsSum = Weights.x + Weights.y + Weights.z + Weights.w;
+	if ( WeightsSum > 0.0 )
 	{
-		FragColor = vec4( GetDebugColour(int(Joints.x)), 1 );
+		vec3 JointColour;
+		for ( int j=0;	j<4;	j++ )
+			JointColour += GetDebugColour(int(Joints[j])) * Weights[j];
+
+		//FragColor = vec4( GetDebugColour(int(Joints.x)), 0.3 );
+		FragColor = vec4( JointColour, 0.3 );
 		return;
 	}
-*/
+	
 	if ( Normal.x + Normal.y + Normal.z != 0.0 )
 	{
 		//	normal -1...1 to 0...1
@@ -609,7 +622,7 @@ export default class ModelViewer extends HTMLElement
 		
 		if ( !this.Assets['Cube'] )
 		{
-			const Geo = CreateCubeGeometry(-0.1,0.1);
+			const Geo = CreateCubeGeometry(-CubeSize,CubeSize);
 			
 			//	rename pop attributes to GLTF names
 			Geo.POSITION = Geo.LocalPosition;
@@ -646,12 +659,27 @@ export default class ModelViewer extends HTMLElement
 			async function PushGeometry(Name,Geometry)
 			{
 				//const Geo = CreateCubeGeometry(0,1);
+				if ( Geometry.Attribs.JOINTS_0 )
+				{
+					const JOINTS_0 = Geometry.Attribs.JOINTS_0;
+					const JointSet = {};
+					for ( let i=0;	i<JOINTS_0.Data.length;	i+=4 )
+					{
+						let j0123 = JOINTS_0.Data.slice(i,i+4);
+						let j0 = j0123[0];
+						JointSet[j0] = true;
+					}
+					console.log(`JOINTS_0 used; ${Object.keys(JointSet)}`);
+				}
 				this.Assets[Name] = await RenderContext.CreateGeometry( Geometry.Attribs, Geometry.TriangleIndexes );
 			}
-			async function PushActor(Actor)
+			async function PushActor(Actor,SceneNodeIndex)
 			{
-				Actor.Translation = Actor.Translation || [0,0,0];
-				this.Actors.push(Actor);
+				let z = SceneNodeIndex * -0.5;
+				Actor.Translation = Actor.Translation || [0,0,z];
+
+				//if ( !Actor.Skeleton )
+					this.Actors.push(Actor);
 				
 				//	if the actor has a skeleton, make a sibling actor
 				//	gr: i believe a node can only have 1 skin...
@@ -660,13 +688,18 @@ export default class ModelViewer extends HTMLElement
 				{
 					try
 					{
-						function AddJoint(Joint)
+						function AddJoint(Joint,JointIndex)
 						{
 							const CubeActor = {};
 							CubeActor.Geometry = 'Cube';
 							CubeActor.Translation = Joint.Translation;
+							CubeActor.Translation[2] += z;
 							CubeActor.Rotation = Joint.Rotation;
 							CubeActor.Uniforms = {};
+							
+							JointIndex = Joint.JointIndex;
+							//	popengine gl system allows attributes to be defined in uniforms, will auto-instance data
+							CubeActor.Uniforms.JOINTS_0 = [JointIndex,JointIndex,JointIndex,JointIndex];
 							this.Actors.push(CubeActor);
 						}
 						
