@@ -143,12 +143,15 @@ out vec2 uv;
 out vec3 Normal;
 out vec4 Weights;
 out vec4 Joints;
+in vec4 InstancedPosition;
 uniform mat4 LocalToWorldTransform;
 uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
 void main()
 {
-	gl_Position = CameraProjectionTransform * WorldToCameraTransform * LocalToWorldTransform * vec4(LocalPosition,1);
+	vec4 WorldPosition = LocalToWorldTransform * vec4(LocalPosition+InstancedPosition.xyz,1);
+	//WorldPosition.xyz += ;
+	gl_Position = CameraProjectionTransform * WorldToCameraTransform * WorldPosition;
 	uv = LocalUv.xy;
 	Normal = LocalNormal;
 	vec4 NormalWorld = (LocalToWorldTransform * vec4(LocalPosition,0));
@@ -677,6 +680,18 @@ export default class ModelViewer extends HTMLElement
 			{
 				let z = SceneNodeIndex * -0.5;
 				Actor.Translation = Actor.Translation || [0,0,z];
+				
+				function GeneratePosition(_,Index)
+				{
+					let Rows = 40;
+					let x = Index % Rows;
+					let z = Math.floor(Index/Rows);
+					x *= 2;
+					z *= -2;
+					return [x,0,z,1];
+				}
+				const LotsOfPositions = [...new Array(1000)].map(GeneratePosition).flat(1);
+				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
 				//if ( !Actor.Skeleton )
 					this.Actors.push(Actor);
