@@ -160,9 +160,10 @@ void main()
 	vec3 JointPos = JointPos4.xyz;
 
 	float UniqueNumber = float(gl_InstanceID * 77) + JOINTS_0[0];
-	float JointOffsetf = Time + UniqueNumber * 0.777;
-	vec3 JointOffset = vec3( cos(JointOffsetf), sin(JointOffsetf), 0);
-	JointPos += JointOffset * 0.2;
+	float TimeRadians = radians( Time * 360.0 );
+	TimeRadians += UniqueNumber * 0.777;
+	vec3 JointOffset = vec3( cos(TimeRadians), sin(TimeRadians), 0);
+	JointPos += JointOffset * 0.04;
 
 	vec4 LocalPos4 = JointToWorldMatrixes[int(JOINTS_0.x)] * vec4(JointPos,1);
 	LocalPos = LocalPos4.xyz;
