@@ -147,10 +147,28 @@ in vec4 InstancedPosition;
 uniform mat4 LocalToWorldTransform;
 uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
+uniform float Time;
+uniform mat4 JointToWorldMatrixes[100];
+uniform mat4 WorldToJointMatrixes[100];
+
 void main()
 {
-	vec4 WorldPosition = LocalToWorldTransform * vec4(LocalPosition+InstancedPosition.xyz,1);
-	//WorldPosition.xyz += ;
+	vec3 LocalPos = LocalPosition;
+
+	//	move to joint space, do joint-local transform, then back to local space
+	vec4 JointPos4 = WorldToJointMatrixes[int(JOINTS_0.x)] * vec4(LocalPos,1);
+	vec3 JointPos = JointPos4.xyz;
+
+	float UniqueNumber = float(gl_InstanceID * 77) + JOINTS_0[0];
+	float JointOffsetf = Time + UniqueNumber * 0.777;
+	vec3 JointOffset = vec3( cos(JointOffsetf), sin(JointOffsetf), 0);
+	JointPos += JointOffset * 0.2;
+
+	vec4 LocalPos4 = JointToWorldMatrixes[int(JOINTS_0.x)] * vec4(JointPos,1);
+	LocalPos = LocalPos4.xyz;
+
+	vec4 WorldPosition = LocalToWorldTransform * vec4(LocalPos,1);
+	WorldPosition.xyz += InstancedPosition.xyz;
 	gl_Position = CameraProjectionTransform * WorldToCameraTransform * WorldPosition;
 	uv = LocalUv.xy;
 	Normal = LocalNormal;
@@ -193,7 +211,7 @@ void main()
 {
 	float JointSum = Joints.x + Joints.y + Joints.z + Joints.w;
 	float WeightsSum = Weights.x + Weights.y + Weights.z + Weights.w;
-	if ( WeightsSum > 0.0 )
+	if ( WeightsSum > 0.0 && false )
 	{
 		vec3 JointColour;
 		for ( int j=0;	j<4;	j++ )
@@ -678,7 +696,7 @@ export default class ModelViewer extends HTMLElement
 			}
 			async function PushActor(Actor,SceneNodeIndex)
 			{
-				let z = SceneNodeIndex * -0.5;
+				let z = SceneNodeIndex * 0;
 				Actor.Translation = Actor.Translation || [0,0,z];
 				
 				function GeneratePosition(_,Index)
@@ -690,12 +708,9 @@ export default class ModelViewer extends HTMLElement
 					z *= -2;
 					return [x,0,z,1];
 				}
-				const LotsOfPositions = [...new Array(1000)].map(GeneratePosition).flat(1);
+				const LotsOfPositions = [...new Array(2000)].map(GeneratePosition).flat(1);
 				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
-				//if ( !Actor.Skeleton )
-					this.Actors.push(Actor);
-				
 				//	if the actor has a skeleton, make a sibling actor
 				//	gr: i believe a node can only have 1 skin...
 				//		doesnt make sense to have multiple skins for one scene object
@@ -728,6 +743,15 @@ export default class ModelViewer extends HTMLElement
 						console.error(`Error loading skeleton; ${e}`);
 					}
 				}
+
+				if ( Actor.Skeleton )
+				{
+					Actor.Uniforms.WorldToJointMatrixes = Actor.Skeleton.WorldToJointMatrixes;
+					Actor.Uniforms.JointToWorldMatrixes = Actor.Skeleton.JointToWorldMatrixes;
+				}
+				
+				//if ( !Actor.Skeleton )
+					this.Actors.push(Actor);
 			}
 			try
 			{
@@ -783,6 +807,7 @@ export default class ModelViewer extends HTMLElement
 			Uniforms.LocalToWorldTransform = LocalToWorldTransform;
 			Uniforms.WorldToCameraTransform = WorldToCameraMatrix;
 			Uniforms.CameraProjectionTransform = CameraProjectionMatrix;
+			Uniforms.Time = Time;
 			Commands.push(['Draw',Geometry,Shader,Uniforms]);
 			
 		}
