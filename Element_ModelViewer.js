@@ -4,6 +4,7 @@ import Camera from './PopEngine/Camera.js'
 import ParseGltf from './PopEngine/PopGltf.js/Gltf.js'
 import DragAndDropHandler from './PopEngine/HtmlDragAndDropHandler.js'
 import * as PopMath from './PopEngine/Math.js'
+import {MatrixMultiply4x4,CreateTranslationMatrix,CreateTranslationQuaternionMatrix,CreateIdentityMatrix,MatrixInverse4x4,TransformPosition} from '../PopEngine/Math.js'
 
 const GltfExtensions = ['gltf','glb'];
 
@@ -157,6 +158,10 @@ uniform mat4 JointTransforms[MAX_JOINTS];
 #define mat4_Identity	mat4( vec4(1,0,0,0), vec4(0,1,0,0), vec4(0,0,1,0), vec4(0,0,0,1) )
 mat4 GetJointTransform(int JointIndex)
 {
+	return mat4_Identity;
+	vec3 Offset = vec3(0,0.2,0.2);
+	//return mat4( vec4(1,0,0,0), vec4(0,1,0,0), vec4(0,0,1,0), vec4(Offset,1) );
+
 /*
 	float UniqueNumber = float(gl_InstanceID * 77) + JOINTS_0[0];
 	float TimeRadians = radians( Time * 360.0 );
@@ -164,15 +169,17 @@ mat4 GetJointTransform(int JointIndex)
 	vec3 JointOffset = vec3( cos(TimeRadians), sin(TimeRadians), 0);
 	JointPos += JointOffset * 0.04;
 */
-	int Joint0 = int(JOINTS_0.x);
-	mat4 Joint0Transform = JointTransforms[Joint0];
+	mat4 Joint0Transform = JointTransforms[JointIndex];
 	if ( Joint0Transform[3].w != 1.0 )
 		return mat4_Identity;
 	return Joint0Transform;
 }
 
-vec3 GetWeightedJointPos(vec3 JointPosition)
+vec4 GetWeightedJointPos(vec4 JointPosition)
 {
+return JointPosition;
+	return GetJointTransform( int(JOINTS_0[0]) ) * JointPosition;
+/*
 	vec3 Position = vec3(0,0,0);
 	for ( int j=0;	j<4;	j++ )
 	{
@@ -182,6 +189,7 @@ vec3 GetWeightedJointPos(vec3 JointPosition)
 		Position += JointPos4.xyz * Weightj;
 	}
 	return Position;
+*/
 }
 
 void main()
@@ -191,9 +199,9 @@ void main()
 	//	move to joint space, do joint-local transform, then back to local space
 	vec4 JointPos4 = WorldToJointMatrixes[int(JOINTS_0.x)] * vec4(LocalPos,1);
 
-	JointPos4.xyz = GetWeightedJointPos(JointPos4.xyz);
+	JointPos4 = GetWeightedJointPos(JointPos4);
 	vec4 LocalPos4 = JointToWorldMatrixes[int(JOINTS_0.x)] * JointPos4;
-	LocalPos = LocalPos4.xyz;
+	LocalPos = LocalPos4.xyz ;//* LocalPos4.www;
 
 	vec4 WorldPosition = LocalToWorldTransform * vec4(LocalPos,1);
 	WorldPosition.xyz += InstancedPosition.xyz;
@@ -743,7 +751,8 @@ export default class ModelViewer extends HTMLElement
 				//	if the actor has a skeleton, make a sibling actor
 				//	gr: i believe a node can only have 1 skin...
 				//		doesnt make sense to have multiple skins for one scene object
-				if ( Actor.Skeleton )
+				const ActorCubeForJoints = false;
+				if ( Actor.Skeleton && ActorCubeForJoints )
 				{
 					try
 					{
@@ -844,12 +853,30 @@ export default class ModelViewer extends HTMLElement
 			{
 				const ClipLength = Actor.Animation.LastKeyframeTime;
 				const AnimationFrame = Actor.Animation.GetFrame(Time);
-				const JointTransforms = Actor.Skeleton.GetJointTransforms( AnimationFrame );
+				const JointTransforms = Actor.Skeleton.GetJointWorldTransforms( AnimationFrame );
 				Uniforms.JointTransforms = JointTransforms;
+				
+				
+				//	draw a cube at each joint
+				function DrawJoint(Joint,JointIndex)
+				{
+					const Geo = Assets['Cube'];
+					//const Pos = Joint.Translation;
+					//const OriginalLocalToWorld = PopMath.CreateTranslationMatrix( ...Joint.Translation );
+					//let LocalToWorldTransform = MatrixMultiply4x4( OriginalLocalToWorld, JointTransforms[JointIndex] );
+					const NewUniforms = Object.assign( {}, Uniforms );
+					//NewUniforms.LocalToWorldTransform = LocalToWorldTransform;
+					NewUniforms.LocalToWorldTransform = JointTransforms[JointIndex];
+					
+					
+					Commands.push(['Draw',Geo,Shader,NewUniforms]);
+				}
+				Actor.Skeleton.Joints.forEach( DrawJoint.bind(this) );
+				
+				break;
 			}
 			
-			Commands.push(['Draw',Geometry,Shader,Uniforms]);
-			
+			//Commands.push(['Draw',Geometry,Shader,Uniforms]);
 		}
 		
 		return Commands;
