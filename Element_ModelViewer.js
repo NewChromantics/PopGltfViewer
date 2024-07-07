@@ -85,6 +85,7 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 			if ( Node.skin !== undefined )
 			{
 				Actor.Skeleton = Gltf.GetSkeleton(Node.skin);
+				Actor.Animation = Gltf.GetAnimation( Gltf.GetAnimationNames()[0] );
 			}
 			
 			//	an actor here, may have multiple meshes!
@@ -148,8 +149,40 @@ uniform mat4 LocalToWorldTransform;
 uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
 uniform float Time;
-uniform mat4 JointToWorldMatrixes[100];
-uniform mat4 WorldToJointMatrixes[100];
+#define MAX_JOINTS	70
+uniform mat4 JointToWorldMatrixes[MAX_JOINTS];
+uniform mat4 WorldToJointMatrixes[MAX_JOINTS];
+uniform mat4 JointTransforms[MAX_JOINTS];
+
+#define mat4_Identity	mat4( vec4(1,0,0,0), vec4(0,1,0,0), vec4(0,0,1,0), vec4(0,0,0,1) )
+mat4 GetJointTransform(int JointIndex)
+{
+/*
+	float UniqueNumber = float(gl_InstanceID * 77) + JOINTS_0[0];
+	float TimeRadians = radians( Time * 360.0 );
+	TimeRadians += UniqueNumber * 0.777;
+	vec3 JointOffset = vec3( cos(TimeRadians), sin(TimeRadians), 0);
+	JointPos += JointOffset * 0.04;
+*/
+	int Joint0 = int(JOINTS_0.x);
+	mat4 Joint0Transform = JointTransforms[Joint0];
+	if ( Joint0Transform[3].w != 1.0 )
+		return mat4_Identity;
+	return Joint0Transform;
+}
+
+vec3 GetWeightedJointPos(vec3 JointPosition)
+{
+	vec3 Position = vec3(0,0,0);
+	for ( int j=0;	j<4;	j++ )
+	{
+		float Weightj = WEIGHTS_0[j];
+		mat4 JointTransform = GetJointTransform( int(JOINTS_0[j]) );
+		vec4 JointPos4 = JointTransform * vec4(JointPosition,1);
+		Position += JointPos4.xyz * Weightj;
+	}
+	return Position;
+}
 
 void main()
 {
@@ -157,15 +190,9 @@ void main()
 
 	//	move to joint space, do joint-local transform, then back to local space
 	vec4 JointPos4 = WorldToJointMatrixes[int(JOINTS_0.x)] * vec4(LocalPos,1);
-	vec3 JointPos = JointPos4.xyz;
 
-	float UniqueNumber = float(gl_InstanceID * 77) + JOINTS_0[0];
-	float TimeRadians = radians( Time * 360.0 );
-	TimeRadians += UniqueNumber * 0.777;
-	vec3 JointOffset = vec3( cos(TimeRadians), sin(TimeRadians), 0);
-	JointPos += JointOffset * 0.04;
-
-	vec4 LocalPos4 = JointToWorldMatrixes[int(JOINTS_0.x)] * vec4(JointPos,1);
+	JointPos4.xyz = GetWeightedJointPos(JointPos4.xyz);
+	vec4 LocalPos4 = JointToWorldMatrixes[int(JOINTS_0.x)] * JointPos4;
 	LocalPos = LocalPos4.xyz;
 
 	vec4 WorldPosition = LocalToWorldTransform * vec4(LocalPos,1);
@@ -210,6 +237,7 @@ vec3 GetDebugColour(int x)
 
 void main()
 {
+	float Alpha = 0.3;
 	float JointSum = Joints.x + Joints.y + Joints.z + Joints.w;
 	float WeightsSum = Weights.x + Weights.y + Weights.z + Weights.w;
 	if ( WeightsSum > 0.0 && false )
@@ -219,7 +247,7 @@ void main()
 			JointColour += GetDebugColour(int(Joints[j])) * Weights[j];
 
 		//FragColor = vec4( GetDebugColour(int(Joints.x)), 0.3 );
-		FragColor = vec4( JointColour, 0.3 );
+		FragColor = vec4( JointColour, Alpha );
 		return;
 	}
 	
@@ -227,12 +255,12 @@ void main()
 	{
 		//	normal -1...1 to 0...1
 		vec3 NormalColour = (Normal + 1.0) / 2.0;
-		FragColor = vec4(NormalColour,1);
+		FragColor = vec4(NormalColour,Alpha);
 		return;
 	}
 	bool AlternativeColour = IsAlternativeUv();
 	float Blue = AlternativeColour?1.0:0.0;
-	FragColor = vec4(uv,Blue,1);
+	FragColor = vec4(uv,Blue,Alpha);
 }
 `;
 
@@ -709,7 +737,7 @@ export default class ModelViewer extends HTMLElement
 					z *= -2;
 					return [x,0,z,1];
 				}
-				const LotsOfPositions = [...new Array(2000)].map(GeneratePosition).flat(1);
+				const LotsOfPositions = [...new Array(1)].map(GeneratePosition).flat(1);
 				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
 				//	if the actor has a skeleton, make a sibling actor
@@ -781,7 +809,9 @@ export default class ModelViewer extends HTMLElement
 	{
 		const ScreenViewport = [0,0,ScreenRect[2],ScreenRect[3]];
 		const Commands = [];
-		const Time = ((Pop.GetTimeNowMs()/1000) % 2)/2;
+		let Time = (Pop.GetTimeNowMs()/1000) % 5;
+		//let Time = ((Pop.GetTimeNowMs()/1000) % 2)/2;
+
 		//const ClearColour = [Time,1,0];
 		const ClearColour = this.clearColour;
 		Commands.push(['SetRenderTarget',null,ClearColour]);
@@ -809,6 +839,15 @@ export default class ModelViewer extends HTMLElement
 			Uniforms.WorldToCameraTransform = WorldToCameraMatrix;
 			Uniforms.CameraProjectionTransform = CameraProjectionMatrix;
 			Uniforms.Time = Time;
+			
+			if ( Actor.Skeleton && Actor.Animation )
+			{
+				const ClipLength = Actor.Animation.LastKeyframeTime;
+				const AnimationFrame = Actor.Animation.GetFrame(Time);
+				const JointTransforms = Actor.Skeleton.GetJointTransforms( AnimationFrame );
+				Uniforms.JointTransforms = JointTransforms;
+			}
+			
 			Commands.push(['Draw',Geometry,Shader,Uniforms]);
 			
 		}
