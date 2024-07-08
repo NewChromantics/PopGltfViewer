@@ -86,7 +86,9 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 			if ( Node.skin !== undefined )
 			{
 				Actor.Skeleton = Gltf.GetSkeleton(Node.skin);
-				Actor.Animation = Gltf.GetAnimation( Gltf.GetAnimationNames()[0] );
+				const FirstAnimation = Gltf.GetAnimationNames()[0];
+				if ( FirstAnimation )
+					Actor.Animation = Gltf.GetAnimation( FirstAnimation );
 			}
 			
 			//	an actor here, may have multiple meshes!
@@ -550,8 +552,9 @@ export default class ModelViewer extends HTMLElement
 		this.RenderView = new Pop.Gui.RenderView('Model',Canvas);
 		this.RenderContext = new Pop.Opengl.Context(this.RenderView);
 		this.Camera = new Camera();
-		this.Camera.Position = [ 0,1,5 ];
-		
+		this.Camera.LookAt = [ 0,0.5,0 ];
+		this.Camera.Position = [ 0,1,1.5 ];
+
 		//	bind mouse events to camera control
 		SetupCameraControl(this.RenderView,this.Camera);
 		
@@ -747,7 +750,7 @@ export default class ModelViewer extends HTMLElement
 					z *= -2;
 					return [x,0,z,1];
 				}
-				const LotsOfPositions = [...new Array(1000)].map(GeneratePosition).flat(1);
+				const LotsOfPositions = [...new Array(1)].map(GeneratePosition).flat(1);
 				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
 				//	if the actor has a skeleton, make a sibling actor
@@ -850,10 +853,14 @@ export default class ModelViewer extends HTMLElement
 			Uniforms.CameraProjectionTransform = CameraProjectionMatrix;
 			Uniforms.Time = Time;
 			
-			if ( Actor.Skeleton && Actor.Animation )
+			if ( Actor.Skeleton )
 			{
-				const ClipLength = Actor.Animation.LastKeyframeTime;
-				const AnimationFrame = Actor.Animation.GetFrame(Time);
+				let AnimationFrame = null;
+				if ( Actor.Animation )
+				{
+					const ClipLength = Actor.Animation.LastKeyframeTime;
+					AnimationFrame = Actor.Animation.GetFrame(Time);
+				}
 				const JointWorldTransforms = Actor.Skeleton.GetJointWorldTransforms( AnimationFrame );
 				Uniforms.JointTransforms = JointWorldTransforms;
 				
