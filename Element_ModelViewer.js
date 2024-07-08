@@ -337,12 +337,17 @@ function SetupCameraControl(RenderView,Camera)
 */
 export default class ModelViewer extends HTMLElement 
 {
+	#SceneCount = 0;
+	
 	constructor()
 	{
 		super();
 
 		this.Assets = {};	//	render assets
 		this.Actors = [];
+		
+		//	hold onto all loaded animations
+		this.Animations = {};
 		
 		//	cache of files for drag & drop
 		this.Files = {};	//	[Filename] = File
@@ -399,6 +404,8 @@ export default class ModelViewer extends HTMLElement
 		const RgbaString = JSON.stringify(Rgba);
 		this.setAttribute('clearColour', RgbaString);
 	}
+	
+	get ClearSceneOnNewFile()	{	return false;	}
 	
 	async OnDroppedFiles(NewFiles)
 	{
@@ -552,8 +559,8 @@ export default class ModelViewer extends HTMLElement
 		this.RenderView = new Pop.Gui.RenderView('Model',Canvas);
 		this.RenderContext = new Pop.Opengl.Context(this.RenderView);
 		this.Camera = new Camera();
-		this.Camera.LookAt = [ 0,0.5,0 ];
-		this.Camera.Position = [ 0,1,1.5 ];
+		this.Camera.LookAt = [ 0,1,0 ];
+		this.Camera.Position = [ 0,1,4 ];
 
 		//	bind mouse events to camera control
 		SetupCameraControl(this.RenderView,this.Camera);
@@ -697,11 +704,19 @@ export default class ModelViewer extends HTMLElement
 		if ( this.PendingModelFilename )
 		{
 			//	delete old actors
-			this.Actors = [];
+			if ( this.ClearSceneOnNewFile )
+			{
+				this.Actors = [];
+				this.#SceneCount = 0;
+			}
+				
 			
 			//	pop pending value so another thread can replace it again
 			const Filename = this.PendingModelFilename;
 			this.PendingModelFilename = null;
+			
+			//	save any new animations, to apply to previous skeletons for testing
+			const NewAnimations = [];
 			
 			//	wrap load calls with status update
 			const LoadStringAsync = async function(Filename)
@@ -736,10 +751,13 @@ export default class ModelViewer extends HTMLElement
 				}
 				this.Assets[Name] = await RenderContext.CreateGeometry( Geometry.Attribs, Geometry.TriangleIndexes );
 			}
+			
 			async function PushActor(Actor,SceneNodeIndex)
 			{
 				let z = SceneNodeIndex * 0;
-				Actor.Translation = Actor.Translation || [0,0,z];
+				let x = this.#SceneCount;
+				Actor.Translation = Actor.Translation || [x,0,z];
+				
 				
 				function GeneratePosition(_,Index)
 				{
@@ -750,7 +768,7 @@ export default class ModelViewer extends HTMLElement
 					z *= -2;
 					return [x,0,z,1];
 				}
-				const LotsOfPositions = [...new Array(1)].map(GeneratePosition).flat(1);
+				const LotsOfPositions = [...new Array(1000)].map(GeneratePosition).flat(1);
 				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
 				//	if the actor has a skeleton, make a sibling actor
@@ -798,7 +816,13 @@ export default class ModelViewer extends HTMLElement
 			}
 			try
 			{
-				await LoadGltf( Filename, LoadStringAsync.bind(this), LoadBufferAsync.bind(this), OnLoadingBuffer.bind(this), PushGeometry.bind(this), PushActor.bind(this) );
+				const Gltf = await LoadGltf( Filename, LoadStringAsync.bind(this), LoadBufferAsync.bind(this), OnLoadingBuffer.bind(this), PushGeometry.bind(this), PushActor.bind(this) );
+				
+				for ( let AnimationName of Gltf.GetAnimationNames() )
+				{
+					const Animation = Gltf.GetAnimation(AnimationName);
+					this.Animations[AnimationName] = Animation;
+				}
 				
 				if ( this.Actors.length == 0 )
 					throw `GLTF loaded without error, but didn't add any actors.`;
@@ -814,17 +838,19 @@ export default class ModelViewer extends HTMLElement
 				CubeActor.Translation = [0,0,0];
 				this.Actors.push(CubeActor);
 			}
+			
+			this.#SceneCount++;
 		}
 			
-		return this.Assets; 
+		
+		return this.Assets;
 	}
 	
 	GetRenderCommands(Assets,ScreenRect)
 	{
 		const ScreenViewport = [0,0,ScreenRect[2],ScreenRect[3]];
 		const Commands = [];
-		let Time = (Pop.GetTimeNowMs()/1000) % 5;
-		//let Time = ((Pop.GetTimeNowMs()/1000) % 2)/2;
+		let Time = (Pop.GetTimeNowMs()/1000) % 10;
 
 		//const ClearColour = [Time,1,0];
 		const ClearColour = this.clearColour;
@@ -856,10 +882,13 @@ export default class ModelViewer extends HTMLElement
 			if ( Actor.Skeleton )
 			{
 				let AnimationFrame = null;
-				if ( Actor.Animation )
+				//if ( Actor.Animation )
+				const Animation = Object.values(this.Animations)[0];
+				if ( Animation )
 				{
-					const ClipLength = Actor.Animation.LastKeyframeTime;
-					AnimationFrame = Actor.Animation.GetFrame(Time);
+					const ClipLength = Animation.LastKeyframeTime;
+					Time = (Pop.GetTimeNowMs()/1000) % ClipLength;
+					AnimationFrame = Animation.GetFrame(Time);
 				}
 				const JointWorldTransforms = Actor.Skeleton.GetJointWorldTransforms( AnimationFrame );
 				Uniforms.JointTransforms = JointWorldTransforms;
