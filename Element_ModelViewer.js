@@ -151,65 +151,67 @@ uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
 uniform float Time;
 #define MAX_JOINTS	70
-uniform mat4 JointToWorldMatrixes[MAX_JOINTS];
 uniform mat4 WorldToJointMatrixes[MAX_JOINTS];
 uniform mat4 JointTransforms[MAX_JOINTS];
 
 #define mat4_Identity	mat4( vec4(1,0,0,0), vec4(0,1,0,0), vec4(0,0,1,0), vec4(0,0,0,1) )
 mat4 GetJointTransform(int JointIndex)
 {
-	return mat4_Identity;
-	vec3 Offset = vec3(0,0.2,0.2);
-	//return mat4( vec4(1,0,0,0), vec4(0,1,0,0), vec4(0,0,1,0), vec4(Offset,1) );
+	if ( JointIndex < 0 )
+		return mat4_Identity;
 
-/*
-	float UniqueNumber = float(gl_InstanceID * 77) + JOINTS_0[0];
-	float TimeRadians = radians( Time * 360.0 );
-	TimeRadians += UniqueNumber * 0.777;
-	vec3 JointOffset = vec3( cos(TimeRadians), sin(TimeRadians), 0);
-	JointPos += JointOffset * 0.04;
-*/
 	mat4 Joint0Transform = JointTransforms[JointIndex];
+	//	dont apply if (assuming) all zero matrix
 	if ( Joint0Transform[3].w != 1.0 )
 		return mat4_Identity;
 	return Joint0Transform;
 }
 
-vec4 GetWeightedJointPos(vec4 JointPosition)
+mat4 GetWorldToJointTransform(int JointIndex)
 {
-return JointPosition;
-	return GetJointTransform( int(JOINTS_0[0]) ) * JointPosition;
-/*
-	vec3 Position = vec3(0,0,0);
+	if ( JointIndex < 0 )
+		return mat4_Identity;
+
+	return WorldToJointMatrixes[JointIndex];
+}
+
+vec3 GetJointTransformedLocalPosition(int JointIndex,vec4 LocalPosition)
+{
+	//	move to joint space, then apply the joint->world transform
+	vec4 JointPos4 = GetWorldToJointTransform(JointIndex) * LocalPosition;
+	mat4 JointToLocalTransform = GetJointTransform(JointIndex);
+	vec4 LocalPos4 = JointToLocalTransform * JointPos4;
+	return LocalPos4.xyz;// * LocalPos4.www;
+}
+
+vec3 GetWeightedJointTransformedLocalPosition(vec4 LocalPosition)
+{
+	if ( WEIGHTS_0.x == 0.0 || JOINTS_0[0] < 0.0 )
+		return LocalPosition.xyz;
+
+	vec3 Position = vec3(0);
 	for ( int j=0;	j<4;	j++ )
 	{
-		float Weightj = WEIGHTS_0[j];
-		mat4 JointTransform = GetJointTransform( int(JOINTS_0[j]) );
-		vec4 JointPos4 = JointTransform * vec4(JointPosition,1);
-		Position += JointPos4.xyz * Weightj;
+		float Weight = WEIGHTS_0[j];
+		if ( Weight > 0.0 )
+			Position += GetJointTransformedLocalPosition( int(JOINTS_0[j]), LocalPosition ) * Weight;
 	}
 	return Position;
-*/
 }
 
 void main()
 {
 	vec3 LocalPos = LocalPosition;
-
-	//	move to joint space, do joint-local transform, then back to local space
-	vec4 JointPos4 = WorldToJointMatrixes[int(JOINTS_0.x)] * vec4(LocalPos,1);
-
-	JointPos4 = GetWeightedJointPos(JointPos4);
-	vec4 LocalPos4 = JointToWorldMatrixes[int(JOINTS_0.x)] * JointPos4;
-	LocalPos = LocalPos4.xyz ;//* LocalPos4.www;
+	LocalPos = GetWeightedJointTransformedLocalPosition( vec4(LocalPos,1) );
 
 	vec4 WorldPosition = LocalToWorldTransform * vec4(LocalPos,1);
 	WorldPosition.xyz += InstancedPosition.xyz;
 	gl_Position = CameraProjectionTransform * WorldToCameraTransform * WorldPosition;
 	uv = LocalUv.xy;
 	Normal = LocalNormal;
-	vec4 NormalWorld = (LocalToWorldTransform * vec4(LocalPosition,0));
-	//Normal = NormalWorld.xyz / NormalWorld.www;
+	Normal = GetWeightedJointTransformedLocalPosition( vec4(LocalNormal,0) );
+	vec4 NormalWorld = LocalToWorldTransform * vec4(LocalPosition,0);
+	//Normal = NormalWorld.xyz;
 	Joints = JOINTS_0;
 	Weights = WEIGHTS_0;
 }
@@ -245,7 +247,7 @@ vec3 GetDebugColour(int x)
 
 void main()
 {
-	float Alpha = 0.3;
+	float Alpha = 1.0;
 	float JointSum = Joints.x + Joints.y + Joints.z + Joints.w;
 	float WeightsSum = Weights.x + Weights.y + Weights.z + Weights.w;
 	if ( WeightsSum > 0.0 && false )
@@ -745,7 +747,7 @@ export default class ModelViewer extends HTMLElement
 					z *= -2;
 					return [x,0,z,1];
 				}
-				const LotsOfPositions = [...new Array(1)].map(GeneratePosition).flat(1);
+				const LotsOfPositions = [...new Array(1000)].map(GeneratePosition).flat(1);
 				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
 				//	if the actor has a skeleton, make a sibling actor
@@ -785,7 +787,7 @@ export default class ModelViewer extends HTMLElement
 				if ( Actor.Skeleton )
 				{
 					Actor.Uniforms.WorldToJointMatrixes = Actor.Skeleton.WorldToJointMatrixes;
-					Actor.Uniforms.JointToWorldMatrixes = Actor.Skeleton.JointToWorldMatrixes;
+					//Actor.Uniforms.JointToWorldMatrixes = Actor.Skeleton.JointToWorldMatrixes;
 				}
 				
 				//if ( !Actor.Skeleton )
@@ -841,7 +843,6 @@ export default class ModelViewer extends HTMLElement
 			const CameraProjectionMatrix = Camera.GetProjectionMatrix( RenderViewport );
 			const ScreenToCameraTransform = PopMath.MatrixInverse4x4( CameraProjectionMatrix );
 			const CameraToWorldTransform = PopMath.MatrixInverse4x4( WorldToCameraMatrix );
-			//const LocalToWorldTransform = Camera.GetLocalToWorldFrustumTransformMatrix();
 			const LocalToWorldTransform = PopMath.CreateTranslationMatrix( ...Actor.Translation );
 			const WorldToLocalTransform = PopMath.MatrixInverse4x4(LocalToWorldTransform);
 			Uniforms.LocalToWorldTransform = LocalToWorldTransform;
@@ -853,30 +854,44 @@ export default class ModelViewer extends HTMLElement
 			{
 				const ClipLength = Actor.Animation.LastKeyframeTime;
 				const AnimationFrame = Actor.Animation.GetFrame(Time);
-				const JointTransforms = Actor.Skeleton.GetJointWorldTransforms( AnimationFrame );
-				Uniforms.JointTransforms = JointTransforms;
+				const JointWorldTransforms = Actor.Skeleton.GetJointWorldTransforms( AnimationFrame );
+				Uniforms.JointTransforms = JointWorldTransforms;
 				
+				const DrawJointCubes = false;
 				
 				//	draw a cube at each joint
 				function DrawJoint(Joint,JointIndex)
 				{
 					const Geo = Assets['Cube'];
-					//const Pos = Joint.Translation;
-					//const OriginalLocalToWorld = PopMath.CreateTranslationMatrix( ...Joint.Translation );
-					//let LocalToWorldTransform = MatrixMultiply4x4( OriginalLocalToWorld, JointTransforms[JointIndex] );
+					const UseNoJoints = false;	//	just use joint transform directly, for testing
 					const NewUniforms = Object.assign( {}, Uniforms );
-					//NewUniforms.LocalToWorldTransform = LocalToWorldTransform;
-					NewUniforms.LocalToWorldTransform = JointTransforms[JointIndex];
-					
+
+					if ( UseNoJoints )
+					{
+						//NewUniforms.LocalToWorldTransform = LocalToWorldTransform;
+						NewUniforms.LocalToWorldTransform = JointTransforms[JointIndex];
+						NewUniforms.JointTransforms = [];
+						
+						//	popengine gl system allows attributes to be defined in uniforms, will auto-instance data
+						NewUniforms.JOINTS_0 = [-1,-1,-1,-1];
+						NewUniforms.WEIGHTS_0 = [0,0,0,0];
+					}
+					else
+					{
+						const Identity4x4 = CreateIdentityMatrix();
+						NewUniforms.WorldToJointMatrixes = NewUniforms.WorldToJointMatrixes.map( (v,Index) => Identity4x4[Index%16] );
+						//NewUniforms.LocalToWorldTransform = CreateIdentityMatrix();
+						NewUniforms.JOINTS_0 = [JointIndex,JointIndex,JointIndex,JointIndex];
+						NewUniforms.WEIGHTS_0 = [1,0,0,0];
+					}
 					
 					Commands.push(['Draw',Geo,Shader,NewUniforms]);
 				}
-				Actor.Skeleton.Joints.forEach( DrawJoint.bind(this) );
-				
-				break;
+				if ( DrawJointCubes )
+					Actor.Skeleton.Joints.forEach( DrawJoint.bind(this) );
 			}
 			
-			//Commands.push(['Draw',Geometry,Shader,Uniforms]);
+			Commands.push(['Draw',Geometry,Shader,Uniforms]);
 		}
 		
 		return Commands;
