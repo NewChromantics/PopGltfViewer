@@ -768,7 +768,7 @@ export default class ModelViewer extends HTMLElement
 					z *= -2;
 					return [x,0,z,1];
 				}
-				const LotsOfPositions = [...new Array(1000)].map(GeneratePosition).flat(1);
+				const LotsOfPositions = [...new Array(1)].map(GeneratePosition).flat(1);
 				Actor.Uniforms.InstancedPosition = new Float32Array(LotsOfPositions);
 
 				//	if the actor has a skeleton, make a sibling actor
