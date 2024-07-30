@@ -4,7 +4,7 @@ import Camera from './PopEngine/Camera.js'
 import ParseGltf from './PopEngine/PopGltf.js/Gltf.js'
 import DragAndDropHandler from './PopEngine/HtmlDragAndDropHandler.js'
 import * as PopMath from './PopEngine/Math.js'
-import {MatrixMultiply4x4,CreateTranslationMatrix,CreateTranslationQuaternionMatrix,CreateIdentityMatrix,MatrixInverse4x4,TransformPosition} from '../PopEngine/Math.js'
+import {MatrixMultiply4x4,CreateTranslationMatrix,CreateTranslationQuaternionMatrix,CreateIdentityMatrix,MatrixInverse4x4,TransformPosition} from './PopEngine/Math.js'
 
 const GltfExtensions = ['gltf','glb'];
 
