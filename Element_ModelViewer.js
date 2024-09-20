@@ -69,19 +69,22 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 		
 		async function EnumNode(Node)
 		{
+			//	gr: output non mesh nodes!
+			/*
 			//	eg. camera, joint node
 			if ( Node.mesh === undefined )
 			{
 				console.log(`Scene skipping node "${Node.name}" with no mesh`);
 				return;
 			}
-			
-			//const Node = Gltf.Nodes[NodeName];
-			const MeshGroup = Gltf.MeshGroups[Node.mesh];
-			
+			*/
 			const Actor = {};
+			Actor.Name = Node.name;
+			Actor.Translation = Node.translation;
+			Actor.Rotation = Node.rotation;
+			Actor.Scale = Node.scale;
 			Actor.Uniforms = {};
-			
+
 			//	this node has a skeleton!
 			if ( Node.skin !== undefined )
 			{
@@ -90,12 +93,24 @@ async function LoadGltf(GltfFilename,LoadFileAsStringAsync,LoadFileAsArrayBuffer
 				if ( FirstAnimation )
 					Actor.Animation = Gltf.GetAnimation( FirstAnimation );
 			}
-			
-			//	an actor here, may have multiple meshes!
-			//	really need a proper "node" and encompass all parts of an actor (node)
-			for ( let GeometryName of MeshGroup.GeometryNames )
+				
+			if ( Node.mesh !== undefined )
 			{
-				Actor.Geometry = GeometryName;
+				//const Node = Gltf.Nodes[NodeName];
+				const MeshGroup = Gltf.MeshGroups[Node.mesh];
+				
+				
+				//	an actor here, may have multiple meshes!
+				//	really need a proper "node" and encompass all parts of an actor (node)
+				for ( let GeometryName of MeshGroup.GeometryNames )
+				{
+					Actor.Geometry = GeometryName;
+					await EnumActor(Actor,ActorCount);
+				}
+			}
+			else
+			{
+				//	output a single actor for the node
 				await EnumActor(Actor,ActorCount);
 			}
 			
@@ -152,7 +167,7 @@ uniform mat4 LocalToWorldTransform;
 uniform mat4 WorldToCameraTransform;
 uniform mat4 CameraProjectionTransform;
 uniform float Time;
-#define MAX_JOINTS	70
+#define MAX_JOINTS	80
 uniform mat4 WorldToJointMatrixes[MAX_JOINTS];
 uniform mat4 JointTransforms[MAX_JOINTS];
 
@@ -752,11 +767,16 @@ export default class ModelViewer extends HTMLElement
 				this.Assets[Name] = await RenderContext.CreateGeometry( Geometry.Attribs, Geometry.TriangleIndexes );
 			}
 			
-			async function PushActor(Actor,SceneNodeIndex)
+			async function PushActor(Actor,SceneNodeIndex=-1)
 			{
-				let z = SceneNodeIndex * 0;
+				let z = SceneNodeIndex * 0;//(Actor.Geometry?1:0);
+				console.log(`z=${z}`);
 				let x = this.#SceneCount;
-				Actor.Translation = Actor.Translation || [x,0,z];
+				Actor.Translation = Actor.Translation || [0,0,0];
+				Actor.Translation[0] += x;
+				Actor.Translation[2] += z;
+				
+				Actor.Uniforms = Actor.Uniforms || {};
 				
 				
 				function GeneratePosition(_,Index)
@@ -824,6 +844,15 @@ export default class ModelViewer extends HTMLElement
 					this.Animations[AnimationName] = Animation;
 				}
 				
+				//	if there are no skeletons, but there are animations, generate a skeleton from the scene
+				if ( Gltf.GetSkeletons().length == 0 && Gltf.GetAnimationNames().length != 0 )
+				{
+					const SceneSkeleton = Gltf.GetSkeletonFromScene();
+					const FakeActor = {};
+					FakeActor.Skeleton = SceneSkeleton;
+					PushActor.call(this,FakeActor);
+				}
+								
 				if ( this.Actors.length == 0 )
 					throw `GLTF loaded without error, but didn't add any actors.`;
 				this.OnStatus(`Loaded ${Filename}`);
@@ -863,9 +892,6 @@ export default class ModelViewer extends HTMLElement
 			const Geometry = Assets[Actor.Geometry];
 			const Shader = Assets.Shader;
 			
-			if ( !Geometry || !Shader )
-				continue;
-			
 			const Uniforms = Object.assign({},Actor.Uniforms);
 			const RenderViewport = ScreenViewport;
 			const WorldToCameraMatrix = Camera.GetWorldToCameraMatrix();
@@ -893,7 +919,7 @@ export default class ModelViewer extends HTMLElement
 				const JointWorldTransforms = Actor.Skeleton.GetJointWorldTransforms( AnimationFrame );
 				Uniforms.JointTransforms = JointWorldTransforms;
 				
-				const DrawJointCubes = false;
+				const DrawJointCubes = true;
 				
 				//	draw a cube at each joint
 				function DrawJoint(Joint,JointIndex)
@@ -923,11 +949,15 @@ export default class ModelViewer extends HTMLElement
 					
 					Commands.push(['Draw',Geo,Shader,NewUniforms]);
 				}
+				
 				if ( DrawJointCubes )
 					Actor.Skeleton.Joints.forEach( DrawJoint.bind(this) );
 			}
 			
-			Commands.push(['Draw',Geometry,Shader,Uniforms]);
+			if ( Geometry && Shader )
+			{
+				Commands.push(['Draw',Geometry,Shader,Uniforms]);
+			}
 		}
 		
 		return Commands;
